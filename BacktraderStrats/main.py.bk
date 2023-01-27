@@ -1,0 +1,192 @@
+from __future__ import (absolute_import, division, print_function,
+                        unicode_literals)
+from backtrader.analyzers import pyfolio
+from futu import *
+from teststrat import TestStrategy
+from MarkMinerviniModel import *
+from FutuCommInfo import Futu_CommInfo
+from random import sample
+
+import argparse
+import PlateSelectionModel
+import backtrader as bt
+import backtrader.feeds as btfeeds
+import datetime
+import pandas as pd
+
+############################ 全局变量设置 ############################
+FUTUOPEND_ADDRESS = '127.0.0.1'  # FutuOpenD 监听地址
+FUTUOPEND_PORT = 11111  # FutuOpenD 监听端口
+
+TRADING_ENVIRONMENT = TrdEnv.SIMULATE  # 交易环境：真实 / 模拟
+TRADING_PWD = '914138'  # 交易密码，用于解锁交易
+TRADING_PERIOD = KLType.K_1M  # 信号 K 线周期
+# TRADING_PERIOD = KLType.K_DAY
+TRADING_SECURITY = 'HK.00700'  # 交易标的
+FAST_MOVING_AVERAGE = 5  # 均线快线的周期
+SLOW_MOVING_AVERAGE = 10  # 均线慢线的周期
+SUBSCRIBE_NUM_THRESHOLD = 20
+quote_context = OpenQuoteContext(
+    host=FUTUOPEND_ADDRESS, port=FUTUOPEND_PORT)  # 行情对象
+trade_context = OpenHKTradeContext(host=FUTUOPEND_ADDRESS, port=FUTUOPEND_PORT,
+                                   security_firm=SecurityFirm.FUTUSECURITIES)  # 交易对象，根据交易标的修改交易对象类型
+
+def get_acc_holdings():
+    ret, data = trade_context.position_list_query(trd_env=TRADING_ENVIRONMENT)
+    if ret != RET_OK:
+        print('获取持仓数据失败:', data)
+        return None
+    else:
+        if data.shape[0] > 0:
+            holding_position = data['qty'][0]
+        codes = data.code.tolist()
+        quantity_list = data['qty'].tolist()
+    return codes, quantity_list
+
+
+
+def get_code_list():
+    # get holding first
+    valid_codes = []
+    holding_codes, quantity_list = get_acc_holdings()
+    valid_codes.extend(list(holding_codes))
+    if len(valid_codes) >= SUBSCRIBE_NUM_THRESHOLD:
+        return valid_codes
+    stock_df = PlateSelectionModel.getStocks(quote_context)
+    codes = stock_df['code'].tolist()
+    print("holding codes = {}".format(holding_codes))
+    print("candidate codes = {}".format(codes))
+    valid_codes_2 = []
+    end_time = datetime.datetime.now().strftime('%Y-%m-%d')
+    for code in codes:
+        try:
+            # ret, data = quote_context.get_cur_kline(code, num=MMMODEL_PERIOD, ktype=SubType.K_DAY, autype=AuType.NONE)
+            print("code = {}, end_time = {}".format(code, end_time))
+            ret, data, page_req_key = quote_context.request_history_kline(
+                code, start=None, end=end_time, max_count=1000, ktype=SubType.K_DAY, autype=AuType.NONE)
+            time.sleep(1)
+            if ret != RET_OK:
+                print(data)
+                raise Exception("get code list k line failed")
+            if data.empty:
+                continue
+            rule_result = checkMMRules(
+                data['close'].iloc[-1], data, DEFAULT_MA_ONE_PERIOD, DEFAULT_MA_TWO_PERIOD, DEFAULT_MA_THREE_PERIOD)
+            if rule_result['cond']:
+                valid_codes_2.append(code)
+        except Exception as ex:
+            print(ex)
+            continue
+    # TODO it is only a temp solution to sample n stocks for reducing api access times
+    if len(valid_codes_2) > SUBSCRIBE_NUM_THRESHOLD - len(valid_codes):
+        rest_num = SUBSCRIBE_NUM_THRESHOLD - len(valid_codes)
+        valid_codes.extend(sample(valid_codes_2, rest_num))
+    else:
+        valid_codes.extend(valid_codes_2)
+    return valid_codes
+
+
+code_list = get_code_list()
+print('code list = {}'.format(code_list))
+
+
+def generateDataFeed(code):
+    global min_date
+    end_time = datetime.datetime.now().strftime('%Y-%m-%d')
+    ret, data, page_req_key = quote_context.request_history_kline(
+        code, start=None, end=end_time, max_count=1000, ktype=SubType.K_DAY, autype=AuType.NONE)
+    if ret != RET_OK:
+        print(data)
+        raise Exception("request history kline failed, code = {}".format(code))
+    frame = data[["time_key", "open", "high", "low", "close", "volume"]]
+    frame.rename(columns={"time_key": "Date"}, inplace=True)
+    frame['Date'] = frame['Date'].apply(lambda time_key: time_key.split()[0])
+    frame['Date'] = pd.to_datetime(frame['Date'])
+    frame.set_index("Date", inplace=True)
+    # print(frame)
+    return frame
+
+def runstrat():
+    # args = parse_args()
+
+    # Create a cerebro entity
+    cerebro = bt.Cerebro(stdstats=False)
+
+    # Add a strategy
+    cerebro.addstrategy(TestStrategy)
+
+    # Get a pandas dataframe
+    # datapath = ('../../datas/2006-day-001.txt')
+
+    # Simulate the header row isn't there if noheaders requested
+    # skiprows = 1 if args.noheaders else 0
+    # header = None if args.noheaders else 0
+
+    # dataframe = pandas.read_csv(datapath,
+    #                             skiprows=skiprows,
+    #                             header=header,
+    #                             parse_dates=True,
+    #                             index_col=0)
+
+    # if not args.noprint:
+    #     print('--------------------------------------------------')
+    #     print(dataframe)
+    #     print('--------------------------------------------------')
+    for code in code_list:
+        print('----------------------------')
+        print('try to generate code = {}'.format(code))
+        dataframe = generateDataFeed(code)
+        data = bt.feeds.PandasData(dataname=dataframe)
+        # Pass it to the backtrader datafeed and add it to the cerebro
+        cerebro.adddata(data, name=code)
+        print(dataframe)
+        print('----------------------------')
+
+    # Set the commission - 0.03% ... divide by 100 to remove the % FUTU Commision
+    futu_comminfo = Futu_CommInfo(commission=0.0003)
+    # cerebro.broker.setcommission(commission=0.0003)
+    cerebro.broker.addcommissioninfo(futu_comminfo)
+    cerebro.broker.setcash(100000.0)
+    cerebro.addsizer(bt.sizers.FixedSize, stake=100)
+    cerebro.addanalyzer(bt.analyzers.PyFolio, _name='pyfolio')
+    # Print out the starting conditions
+    print('Starting Portfolio Value: %.2f' % cerebro.broker.getvalue())
+    # Run over everything
+    results = cerebro.run()
+    strat = results[0]
+    pyfoliozer = strat.analyzers.getbyname('pyfolio')
+    returns, positions, transactions, gross_lev = pyfoliozer.get_pf_items()
+    print("positions:")
+    print(positions)
+    # Print out the final result
+    print('Final Portfolio Value: %.2f' % cerebro.broker.getvalue())
+    import pyfolio as pf
+    pf.create_full_tear_sheet(
+        returns,
+        positions=positions,
+        transactions=transactions,
+        live_start_date="2021-01-01",
+        round_trips=True)
+   # Plot the result
+    # cerebro.plot(style='bar')
+  
+
+# def parse_args():
+#     parser = argparse.ArgumentParser(
+#         description='Pandas test script')
+
+#     parser.add_argument('--noheaders', action='store_true', default=False,
+#                         required=False,
+#                         help='Do not use header rows')
+
+#     parser.add_argument('--noprint', action='store_true', default=False,
+#                         help='Print the dataframe')
+
+#     return parser.parse_args()
+
+
+if __name__ == '__main__':
+    pd.set_option('display.max_columns', None)  # or 1000
+    pd.set_option('display.max_rows', None)  # or 1000
+    pd.set_option('display.max_colwidth', -1)  # or 199
+    runstrat()

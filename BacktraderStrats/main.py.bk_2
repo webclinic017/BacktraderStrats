@@ -1,0 +1,47 @@
+import futu_util
+import argparse
+
+class OpenPositionAction(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        setattr(namespace, self.dest, values)
+        # print('%r %r %r' % (namespace, values, option_string))
+        # print('code: %s' % namespace.code)
+        print('code: %s open position, quantity: %d' % (namespace.code, int(namespace.open_qty)))
+        futu_util.open_context()
+        futu_util.open_position(namespace.code, open_quantity=int(namespace.open_qty))
+        futu_util.close_context()
+
+class ClosePositionAction(argparse.Action):
+    def __call__(self, parser, namespace, values, option_string=None):
+        print('close position')
+        setattr(namespace, self.dest, values)
+        # print('%r %r %r' % (namespace, values, option_string))
+        futu_util.open_context()
+        futu_util.close_position(namespace.code, quantity=namespace.close_qty)
+        futu_util.close_context()
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description='command line for running futu api')
+    parser.add_argument('--code', action='store', dest='code', default=False,
+                        required=False, help='stock code')
+    parser.add_argument('--openpos', action=OpenPositionAction, dest='open_qty', default=False,
+                        required=False,
+                        help='open position')
+    parser.add_argument('--closepos', action=ClosePositionAction, dest='close_qty', default=False,
+                        help='close postion')
+    parser.add_argument('--clearpos', dest='clearpos', action='store_true', default=False,
+                        help='clear postion')
+    parser.add_argument('--trdenv', dest='trdenv', action='store_true', default=False, help='show trading environment')
+    return parser.parse_args()
+
+
+if __name__ == '__main__':
+    args = parse_args()
+    if args.clearpos:
+        futu_util.open_context()
+        futu_util.clear_position(args.code)
+        futu_util.close_context()
+    if args.trdenv:
+        print(futu_util.TRADING_ENVIRONMENT)
+    # print(args)
