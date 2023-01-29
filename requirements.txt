@@ -58,7 +58,7 @@ protobuf==3.5.1
 pycodestyle==2.8.0
 pycparser==2.21
 pycryptodome==3.11.0
-pyfolio @ git+https://github.com/quantopian/pyfolio@4b901f6d73aa02ceb6d04b7d83502e5c6f2e81aa
+pyfolio
 Pygments==2.10.0
 pyparsing==3.0.6
 pyportfolioopt==1.5.1
@@ -78,7 +78,7 @@ Send2Trash==1.8.0
 simplejson==3.17.5
 six==1.16.0
 statsmodels==0.12.2
-TA-Lib @ file:///D:/dev/goldmind_proj/pylib/TA_Lib-0.4.19-cp36-cp36m-win_amd64.whl
+TA-Lib @ file:///C:/personal/dev/python/BacktraderStrats/pylib/TA_Lib-0.4.19-cp36-cp36m-win_amd64.whl
 terminado==0.12.1
 testpath==0.5.0
 threadpoolctl==3.0.0
