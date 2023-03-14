@@ -145,7 +145,6 @@ class FutuData(with_metaclass(MetaFutuData, DataBase)):
         logger.debug(data)
         dtobj = datetime.strptime(data['time_key'][0], "%Y-%m-%d %H:%M:%S") 
         dt = date2num(dtobj)
-        logger.info(dt)
         if dt <= self.lines.datetime[-1]:
             return False  # time already seen
         # get data by code

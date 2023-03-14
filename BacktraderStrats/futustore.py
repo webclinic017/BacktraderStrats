@@ -47,7 +47,7 @@ class Streamer():
                         # logger.info(data)
                         msg = {'data': data}    
                         self.q.put(msg)
-                        logger.info('put data in queue successfully')
+                        logger.info('put code %s data in queue %s successfully' % (self.dataname, self.q))
                         self.last_time = cur_time
                 else:
                     msg = {'code': ret, 'data': data}
@@ -160,21 +160,7 @@ class FutuStore(with_metaclass(MetaSingleton, object)):
         self._lock_tmoffset = threading.Lock()
         self.tmoffset = timedelta()  # to control time difference with server
 
-        # Structures to hold datas requests
-        self.qs = collections.OrderedDict()  # key: tickerId -> queues
-        self.ts = collections.OrderedDict()  # key: queue -> tickerId
-        self.iscash = dict()  # tickerIds from cash products (for ex: EUR.JPY)
 
-        self.histexreq = dict()  # holds segmented historical requests
-        self.histfmt = dict()  # holds datetimeformat for request
-        self.histsend = dict()  # holds sessionend (data time) for request
-        self.histtz = dict()  # holds sessionend (data time) for request
-
-        self.acc_cash = AutoDict()  # current total cash per account
-        self.acc_value = AutoDict()  # current total value per account
-        self.acc_upds = AutoDict()  # current account valueinfos per account
-
-        self.port_update = False  # indicate whether to signal to broker
 
         self.positions = collections.defaultdict(Position)  # actual positions
 
