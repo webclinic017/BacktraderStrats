@@ -78,7 +78,7 @@ Send2Trash==1.8.0
 simplejson==3.17.5
 six==1.16.0
 statsmodels==0.12.2
-TA-Lib @ file:///C:/personal/dev/python/BacktraderStrats/pylib/TA_Lib-0.4.19-cp36-cp36m-win_amd64.whl
+TA-Lib
 terminado==0.12.1
 testpath==0.5.0
 threadpoolctl==3.0.0
