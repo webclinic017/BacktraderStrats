@@ -1,15 +1,22 @@
 import enum
 import backtrader as bt
 import datetime
+import logging
+from logging.config import fileConfig
+
+fileConfig('logging.conf')
+logger = logging.getLogger()
 
 
 class TestStrategy(bt.Strategy):
     def log(self, txt, dt=None):
-        dt = dt or self.datas[0].datetime.date(0)
-        print('%s, %s' % (dt.isoformat(), txt))
+        dt = dt or self.datas[0].datetime[0]
+        dt = bt.num2date(dt)
+        logger.info('%s, %s' % (dt.isoformat(), txt))
     
     def __init__(self):
         # Keep a reference to the "close" line in the data[0] dataseries
+        logger.info("TestStrategy init")
         self.dataclose = dict()
         self.ema = dict()
         self.order = dict()
@@ -17,7 +24,7 @@ class TestStrategy(bt.Strategy):
         # self.buycomm = dict()
         for i, d in enumerate(self.datas):
             self.dataclose[d] = d.close 
-            self.ema[d] = bt.talib.EMA(d, timeperiod=14)
+            self.ema[d] = bt.talib.EMA(d, timeperiod=3)
             self.order[d] = None
             # self.buyprice[d] = None
             # self.buycomm[d] = None
@@ -26,13 +33,16 @@ class TestStrategy(bt.Strategy):
         # self.order = None
         # self.buyprice = None
         # self.buycomm = None
+    def prenext(self):
+        logger.debug('prenext tick')
 
     def next(self):
         # for d in self.datas:
             # print('d = {}'.format(d))
+        logger.debug('next tick')
         for i, d in enumerate(self.datas): 
-            if self.order[d]:
-                continue
+            # if self.order[d]:
+                # continue
             # Simply log the closing price of the series from the reference
             self.log('Code: %s, Close: %.2f' % (d._name, self.dataclose[d][0]))
             position = self.getposition(d).size

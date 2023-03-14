@@ -1,4 +1,5 @@
 import datetime
+import logging
 
 import backtrader as bt
 from backtrader.feed import DataBase
@@ -9,13 +10,17 @@ from backtrader.metabase import MetaParams
 from futu import *
 import futustore
 
+from logging.config import fileConfig
+
+fileConfig('logging.conf')
+logger = logging.getLogger()
 
 class MetaFutuData(DataBase.__class__):
     def __init__(cls, name, bases, dct):
         '''Class has already been created ... register'''
         # Initialize the class
         super(MetaFutuData, cls).__init__(name, bases, dct)
-        # print(name, bases, dct)
+        # logger.info(name, bases, dct)
         # Register with the store
         futustore.FutuStore.DataCls = cls
 
@@ -33,9 +38,10 @@ class FutuData(with_metaclass(MetaFutuData, DataBase)):
 
 
     def __init__(self, **kwargs):
-        print("futudata init...")
+        logger.info("futudata init...")
         self.futustore = self._store(**kwargs)
-        print("params = {}".format(self.p))
+        logger.info('futustore initialized: {}'.format(self.futustore))
+        logger.info("params = {}".format(self.p))
 
     def islive(self):
         return True
@@ -62,15 +68,18 @@ class FutuData(with_metaclass(MetaFutuData, DataBase)):
         #     if not self.futustore.reconnect():
         #         self._state = self._ST_OVERE
         #         self.push_notification(self.DISCONNECTED)
-        print('futudata _st_start...')
-        self.qlive = self.futustore.streaming_prices(self.p.dataname)
+        logger.info('futudata _st_start...')
+        # self.qlive = self.futustore.streaming_prices([self.p.dataname])
+        self.futustore.subscribe_klines(self.p.dataname)
+        self.qlive = self.futustore.streaming_klines(self.p.dataname)
+        logger.info('data {} live queue is {}'.format(self.p.dataname, self.qlive))
         if self._statelivereconn:
             self.put_notification(self.DELAYED)
 
         self._state = self._ST_LIVE
         if instart:
             self._reconns = self.p.reconnections
-        print('futudata state trans done. state: %s' % self._state)
+        logger.info('futudata state trans done. state: %s' % self._state)
         return True
 
     def stop(self):
@@ -81,18 +90,18 @@ class FutuData(with_metaclass(MetaFutuData, DataBase)):
         pass
 
     def _load(self):
-        # print('futudata _load...')
+        # logger.info('futudata _load...')
         if self._state == self._ST_OVER:
             return False
 
         while True:
-            # print('_load state: %s' % self._state)
+            # logger.info('_load state: %s' % self._state)
             if self._state == self._ST_LIVE:
                 try:
-                    # print('try to pop up msg from queue %s' % self.qlive)
+                    # logger.info('try to pop up msg from queue %s' % self.qlive)
                     msg = (self._storedmsg.pop(None, None) or
                            self.qlive.get(timeout=self._qcheck))
-                    # print('_load popup msg %s ' % msg)
+                    # logger.info('_load popup msg %s ' % msg)
                 except queue.Empty:
                     return None
                 if 'code' in msg:
@@ -112,7 +121,6 @@ class FutuData(with_metaclass(MetaFutuData, DataBase)):
                     if self._laststatus != self.LIVE:
                         if self.qlive.qsize() <= 1:  # very short live queue
                             self.put_notification(self.LIVE)
-
                     ret = self._load_tick(msg)
                     if ret:
                         return True
@@ -133,12 +141,17 @@ class FutuData(with_metaclass(MetaFutuData, DataBase)):
 
         """
         data = msg['data']
-        print('data:')
-        print(data)
+        logger.debug('data:')
+        logger.debug(data)
         dtobj = datetime.strptime(data['time_key'][0], "%Y-%m-%d %H:%M:%S") 
         dt = date2num(dtobj)
+        logger.info(dt)
         if dt <= self.lines.datetime[-1]:
             return False  # time already seen
+        # get data by code
+        data = data[data.code == self.p.dataname]
+        if data.empty:
+            return False
 
         # # Common fields
         self.lines.datetime[0] = dt
@@ -151,9 +164,6 @@ class FutuData(with_metaclass(MetaFutuData, DataBase)):
         self.lines.high[0] = data['high'][0]
         self.lines.low[0] = data['low'][0]
         self.lines.close[0] = data['close'][0]
-        print('lines:')
-        print(self.lines[0])
-        # self.lines.volume[0] = 0.0
-        # self.lines.openinterest[0] = 0.0
 
+        logger.info('load tick successfully')
         return True

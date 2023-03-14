@@ -11,19 +11,64 @@ from backtrader import TimeFrame, Position
 from datetime import date, datetime, timedelta
 from backtrader.utils import AutoDict, UTC
 from futu import *
+from logging.config import fileConfig
+
+fileConfig('logging.conf')
+logger = logging.getLogger()
+
+
+
+class Streamer():
+    last_time = None
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+        self.quote_context = kwargs['quote_context'] 
+        self.dataname = kwargs['dataname']
+        self.trading_period = kwargs['trading_period']
+        self.q = kwargs['q']
+        self.sleep_sec = 10
+
+    def connected(self):
+        if (not futu_util.trade_context) or (not futu_util.quote_context):
+            return False
+        if futu_util.quote_context.status != ContextStatus.READY or futu_util.trade_context.status != ContextStatus.READY: 
+            return False
+        return True
+
+    def stream(self):
+        while self.connected():
+            try:
+                time.sleep(self.sleep_sec)
+                ret, data = self.quote_context.get_cur_kline(self.dataname, 1, self.trading_period, autype=AuType.NONE)
+                if ret == RET_OK:
+                    cur_time = data['time_key'][0]
+                    if cur_time != self.last_time: 
+                        logger.info('try to put code %s data in queue %s' % (self.dataname, self.q))
+                        # logger.info(data)
+                        msg = {'data': data}    
+                        self.q.put(msg)
+                        logger.info('put data in queue successfully')
+                        self.last_time = cur_time
+                else:
+                    msg = {'code': ret, 'data': data}
+                    logger.error(msg)
+            except Exception as e:
+                    logger.info('stream klines failed. msg: %s' % e)
+        return
+
 
 
 class OnBarClass(CurKlineHandlerBase):
     last_time = None
-    
-    def __init__(self, q, trading_period, datanames):
+
+    def __init__(self, trading_period):
         super(OnBarClass, self).__init__()
+        self.code_info_dict = dict()
         self.trading_period = trading_period
-        self.q = q
-        print('assigned q: %s ' % self.q)
-        self.datanames = datanames
-        print('period = %s' % self.trading_period)
-        print('datanames = %s' % self.datanames)
+
+    def add_code(self, q, dataname):
+        self.code_info_dict[dataname] = {'queue': q, 'datanames': dataname} 
+        logger.info('add code info {} successfully'.format(self.code_info_dict[dataname])) 
 
     def on_bar_open(self, data):
         """_summary_
@@ -31,20 +76,26 @@ class OnBarClass(CurKlineHandlerBase):
         Args:
             data (pd.DataFrame): [code, time_key, open, close, high, low, volume, turnover, pe_ratio, turnover_rate, last_close, k_type]
         """
-        msg = {'data': data}
-        print('try to put data in queue %s' % self.q)
-        self.q.put(msg)
-        print('on_bar_open...')
-        print(data) 
+        # logger.info('on bar open tick data: ')
+        # logger.info(data)
+        codes = data.code.drop_duplicates().tolist() 
+        for code in codes:
+            subdata = data[data.code == code]
+            if code in self.code_info_dict:
+                q = self.code_info_dict[code]['queue']
+                logger.info('try to put code %s data in queue %s' % (code, q))
+                msg = {'data': subdata}    
+                q.put(msg)
+                logger.info('put data in queue successfully')
     
     def put_err_msg(self, data, ret_code):
         msg = {'code': ret_code, 'data': data}
-        self.q.put(msg)
-        print(msg)
+        logger.error(msg)
 
     def on_recv_rsp(self, rsp_pb):
         ret_code, data = super(OnBarClass, self).on_recv_rsp(rsp_pb)
-        # print('on recv response...')
+        logger.info('on recv response...')
+        logger.info(data)
         if ret_code == RET_OK:
             cur_time = data['time_key'][0]
             if cur_time != self.last_time and data['k_type'][0] == self.trading_period:
@@ -54,7 +105,6 @@ class OnBarClass(CurKlineHandlerBase):
             return data
         else:
             self.put_err_msg(data, ret_code)
-
 
 class MetaSingleton(MetaParams):
     '''Metaclass to make a metaclassed class a singleton'''
@@ -93,10 +143,7 @@ class FutuStore(with_metaclass(MetaSingleton, object)):
 
     def __init__(self):
         super(FutuStore, self).__init__()
-        
-        self._lock_q = threading.Lock()  # sync access to _tickerId/Queues
-        self._lock_accupd = threading.Lock()  # sync account updates
-        self._lock_pos = threading.Lock()  # sync account updates
+        # self._bar_handler = OnBarClass(self.p.trading_period) 
         self._lock_notif = threading.Lock()  # sync access to notif queue
 
         # Account list received
@@ -172,7 +219,7 @@ class FutuStore(with_metaclass(MetaSingleton, object)):
         # for barsize in self.revdur:
         #     self.revdur[barsize].sort(key=key2fn)
     
-    def streaming_events(slef, tmout=None):
+    def streaming_events(self, tmout=None):
         q = queue.Queue()
         kwargs = {'q': q, 'tmout': tmout}
 
@@ -243,60 +290,69 @@ class FutuStore(with_metaclass(MetaSingleton, object)):
             futu_util.close_context()
         return True
     
-    # def _receive(self, q):
-    #     self.quote_context.set_handler(futu_util.OnBarClass(q, self.trading_period))
 
-    # def receive(self):
-    #     q = queue.Queue()
-    #     print('trading period is %s ' % self.trading_period)
-    #     kwargs = {'queue': q}
-    #     t = threading.Thread(target=self._receive, kwargs=kwargs)
-    #     t.daemon = True
-    #     t.start()
-
-    def _t_streaming_prices(self, q, trading_period, datanames):
+    def _t_streaming_prices(self, q, datanames):
         # futu context
-        print("sreaming_price process starting...")
+        logger.info("sreaming_price process starting...")
         self.quote_context, self.trade_context = futu_util.open_context(host=self.p.host, port=self.p.port)
-        self.quote_context.set_handler(OnBarClass(q, trading_period, datanames))
+        self._bar_handler.add_code(q, datanames[0])
+        self.quote_context.set_handler(self._bar_handler)
+
         try:
-            self.quote_context.subscribe(code_list=datanames, subtype_list=[SubType.TICKER, SubType.ORDER_BOOK, trading_period])
+            logger.info('current subscription status :{}'.format(self.quote_context.query_subscription()))
+            self.quote_context.subscribe(code_list=datanames, subtype_list=[SubType.TICKER, SubType.ORDER_BOOK, self.trading_period])
+            logger.info('subscribe successfully！current subscription status: {}'.format(self.quote_context.query_subscription()))
         except Exception as e:
             self._state = self._ST_OVER
-            print("subscribe failed. msg: %s" % e)
+            logger.info("subscribe failed. msg: %s" % e)
             return
  
-        print("streaming_price process started...")
+        logger.info("streaming_price process started...")
 
     def streaming_prices(self, datanames):
         q = queue.Queue()
-        print('create queue %s' % q)
-        kwargs = {'q': q, 'trading_period': self.trading_period, 'datanames': datanames}
-        print('kwargs = {}'.format(kwargs))
+        logger.info('create queue %s' % q)
+        kwargs = {'q': q, 'datanames': datanames}
+        logger.info('kwargs = {}'.format(kwargs))
         t = threading.Thread(target=self._t_streaming_prices, kwargs=kwargs)
         t.daemon = True
         t.start()
         return q
 
+    def subscribe_klines(self, dataname):
+        logger.info('streaming klines starting')
+        self.quote_context, self.trade_context = futu_util.open_context(host=self.p.host, port=self.p.port)
+        try:
+            logger.info('current subscription status :{}'.format(self.quote_context.query_subscription()))
+            self.quote_context.subscribe(code_list=[dataname], subtype_list=[SubType.TICKER, SubType.ORDER_BOOK, self.trading_period])
+            logger.info('subscribe successfully！current subscription status: {}'.format(self.quote_context.query_subscription()))
+        except Exception as e:
+            self._state = self._ST_OVER
+            logger.info("subscribe failed. msg: %s" % e)
+            return
+ 
+        logger.info("streaming klines process started successfully.")
+
+    def _t_streaming_klines(self, q, dataname):
+        streamer = Streamer(quote_context=self.quote_context, 
+                            dataname=dataname, trading_period=self.trading_period,
+                            q=q)
+        streamer.stream()
+
+    def streaming_klines(self, dataname):
+        q = queue.Queue()
+        logger.info('create queue %s' % q)
+        kwargs = {'q': q, 'dataname': dataname}
+        logger.info('kwargs = {}'.format(kwargs))
+        t = threading.Thread(target=self._t_streaming_klines, kwargs=kwargs)
+        t.daemon = True
+        t.start()
+        return q
+       
     def get_cash(self):
         return self._cash
     
     def get_value(self):
         return self._value
-    # def getTickerQueue(self, start=False):
-    #     '''Creates ticker/Queue for data delivery to a data feed'''
-    #     q = queue.Queue()
-    #     if start:
-    #         q.put(None)
-    #         return q
-
-    #     with self._lock_q:
-    #         tickerId = self.nextTickerId()
-    #         self.qs[tickerId] = q  # can be managed from other thread
-    #         self.ts[q] = tickerId
-    #         self.iscash[tickerId] = False
-
-    #     return tickerId, q
-
     
 
