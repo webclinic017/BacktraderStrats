@@ -14,9 +14,9 @@ RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 
-RUN pip install --upgrade pip
+RUN pip install --upgrade pip -i https://mirrors.aliyun.com/pypi/simple/
 
-RUN pip install numpy
+RUN pip install numpy -i https://mirrors.aliyun.com/pypi/simple/
 
 RUN wget http://prdownloads.sourceforge.net/ta-lib/ta-lib-0.4.0-src.tar.gz && \
     tar -zxvf ta-lib-0.4.0-src.tar.gz && \
@@ -30,7 +30,7 @@ RUN rm -R ta-lib ta-lib-0.4.0-src.tar.gz
 
 COPY requirements.txt /backtrader/requirements.txt
 
-RUN pip install -r /backtrader/requirements.txt 
+RUN pip install -r /backtrader/requirements.txt -i https://mirrors.aliyun.com/pypi/simple/ 
 
 COPY ./BacktraderStrats /backtrader/BacktraderStrats
 
