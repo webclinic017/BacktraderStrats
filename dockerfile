@@ -1,5 +1,8 @@
 FROM python:3.6-slim
 
+RUN sed -i "s/http/https/g" /etc/apt/sources.list
+RUN sed -i "s/deb.debian.org/mirrors.aliyun.com/g" /etc/apt/sources.list
+RUN sed -i "s/security.debian.org\/debian-security/mirrors.aliyun.com\/debian-security/g" /etc/apt/sources.list
 RUN apt-get update
 RUN apt-get install -y --no-install-recommends build-essential gcc wget
 RUN apt-get install -y supervisor
